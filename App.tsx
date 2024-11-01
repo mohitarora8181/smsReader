@@ -1,118 +1,103 @@
-/**
- * Sample React Native App
- * https://github.com/facebook/react-native
- *
- * @format
- */
-
-import React from 'react';
-import type {PropsWithChildren} from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   SafeAreaView,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  useColorScheme,
   View,
+  Text,
+  PermissionsAndroid,
+  DeviceEventEmitter,
+  FlatList,
+  NativeModules,
+  TouchableOpacity
 } from 'react-native';
+import { SmsType } from './types/smsReciever';
+import MessageItem from './MessageItem';
+import Icon from "react-native-vector-icons/MaterialCommunityIcons"
 
-import {
-  Colors,
-  DebugInstructions,
-  Header,
-  LearnMoreLinks,
-  ReloadInstructions,
-} from 'react-native/Libraries/NewAppScreen';
+const { SmsListenerModule } = NativeModules;
 
-type SectionProps = PropsWithChildren<{
-  title: string;
-}>;
 
-function Section({children, title}: SectionProps): React.JSX.Element {
-  const isDarkMode = useColorScheme() === 'dark';
-  return (
-    <View style={styles.sectionContainer}>
-      <Text
-        style={[
-          styles.sectionTitle,
-          {
-            color: isDarkMode ? Colors.white : Colors.black,
-          },
-        ]}>
-        {title}
-      </Text>
-      <Text
-        style={[
-          styles.sectionDescription,
-          {
-            color: isDarkMode ? Colors.light : Colors.dark,
-          },
-        ]}>
-        {children}
-      </Text>
-    </View>
-  );
-}
+const App = () => {
+  const [receiveSmsPermission, setReceiveSmsPermission] = useState('');
+  const [messageList, setMessageList] = useState<SmsType[]>([]);
 
-function App(): React.JSX.Element {
-  const isDarkMode = useColorScheme() === 'dark';
+  const requestSmsPermission = async () => {
+    try {
+      const permission = await PermissionsAndroid
+        .request(PermissionsAndroid.PERMISSIONS.RECEIVE_SMS);
+      setReceiveSmsPermission(permission);
 
-  const backgroundStyle = {
-    backgroundColor: isDarkMode ? Colors.darker : Colors.lighter,
+      const read_sms = await PermissionsAndroid.request(
+        PermissionsAndroid.PERMISSIONS.READ_SMS);
+    } catch (err) {
+      console.log(err);
+    }
   };
 
+  useEffect(() => {
+    requestSmsPermission();
+    fetchMessages();
+  }, []);
+
+
+  const fetchMessages = async () => {
+    try {
+      const lastmessages = await SmsListenerModule.fetchSmsMessages();
+      setMessageList(lastmessages)
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  useEffect(() => {
+    if (receiveSmsPermission === PermissionsAndroid.RESULTS.GRANTED) {
+      let subscriber = DeviceEventEmitter.addListener(
+        'onSMSReceived',
+        message => {
+          const { body, sender, timestamp } = JSON.parse(message);
+          setMessageList(prev => [{ body, sender, timestamp }, ...prev])
+        },
+      );
+
+      return () => {
+        subscriber.remove();
+      };
+    }
+  }, [receiveSmsPermission]);
+
+  const filterPaymentMessages = () => {
+    const paymentKeywords = ["payment", "paid", "received", "amount", "₹", "$", "£", "€", "transaction", "debited", "credited", "balance", "invoice", "bill", "fee", "charge", "withdrawal", "deposit", "transfer", "confirmation", "acknowledgment", "statement", "receipt", "successful", "pending", "declined", "refunded", "authorization", "payment gateway", "credit card", "debit card", "bank account", "mobile wallet", "monthly subscription", "service fee", "payment reminder", "due date", "payment method", "e-wallet", "chargeback", "overdraft"];
+    setMessageList(messageList.filter(message => paymentKeywords.some(keyword => message.body.toLowerCase().includes(keyword))))
+  }
+
+  const refreshList = () => {
+    fetchMessages();
+  }
+
+
   return (
-    <SafeAreaView style={backgroundStyle}>
-      <StatusBar
-        barStyle={isDarkMode ? 'light-content' : 'dark-content'}
-        backgroundColor={backgroundStyle.backgroundColor}
-      />
-      <ScrollView
-        contentInsetAdjustmentBehavior="automatic"
-        style={backgroundStyle}>
-        <Header />
-        <View
-          style={{
-            backgroundColor: isDarkMode ? Colors.black : Colors.white,
-          }}>
-          <Section title="Step One">
-            Edit <Text style={styles.highlight}>App.tsx</Text> to change this
-            screen and then come back to see your edits.
-          </Section>
-          <Section title="See Your Changes">
-            <ReloadInstructions />
-          </Section>
-          <Section title="Debug">
-            <DebugInstructions />
-          </Section>
-          <Section title="Learn More">
-            Read the docs to discover what to do next:
-          </Section>
-          <LearnMoreLinks />
+    <SafeAreaView style={{ flex: 1, backgroundColor: "lightgray" }}>
+      <View style={{ flex: 1, justifyContent: "center", padding: 15 }}>
+        <Text style={{ fontSize: 20, alignSelf: "center", fontWeight: "bold", paddingVertical: 10 }}>
+          Listening Your Messages in RealTime
+        </Text>
+        <View style={{ justifyContent: "space-between", padding: 10, height: 60, flexDirection: "row", alignItems: "center" }}>
+          <TouchableOpacity onPress={() => { refreshList() }} style={{ backgroundColor: "white", padding: 5, width: 40, height: 40, borderRadius: "100%" }}>
+            <Icon name='refresh' size={30} />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => { filterPaymentMessages() }} style={{ padding: 10, backgroundColor: "white", borderRadius: 50, width: 250, alignSelf: "flex-end" }}>
+            <Text style={{ textAlign: "center" }}>Show Payment Messages only</Text>
+          </TouchableOpacity>
         </View>
-      </ScrollView>
+        <View style={{ flex: 1, padding: 10 }}>
+          <FlatList
+            data={messageList}
+            renderItem={({ item }: { item: SmsType }) => {
+              return <MessageItem item={item} />
+            }}
+          />
+        </View>
+      </View>
     </SafeAreaView>
   );
-}
-
-const styles = StyleSheet.create({
-  sectionContainer: {
-    marginTop: 32,
-    paddingHorizontal: 24,
-  },
-  sectionTitle: {
-    fontSize: 24,
-    fontWeight: '600',
-  },
-  sectionDescription: {
-    marginTop: 8,
-    fontSize: 18,
-    fontWeight: '400',
-  },
-  highlight: {
-    fontWeight: '700',
-  },
-});
-
+};
 export default App;
